@@ -1,0 +1,6 @@
+# Proteger API key si subes a GitHub
+js/config.js
+
+# Archivos del sistema
+.DS_Store
+Thumbs.db
