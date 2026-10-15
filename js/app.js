@@ -655,8 +655,38 @@ function initModes() {
 // ────────────────────────────────────────────────
 
 function initApiModal() {
-  /* El boton de API fue quitado del HTML; solo cargamos la key guardada */
-  updateAiIndicators(!!localStorage.getItem('aria-api-key'));
+  updateAiIndicators(false);
+  Dom.btnApi().addEventListener('click', openApiModal);
+  Dom.btnModalClose().addEventListener('click', closeApiModal);
+  Dom.btnToggleKey().addEventListener('click', function() {
+    var input = Dom.apiKeyInput();
+    input.type = input.type === 'password' ? 'text' : 'password';
+  });
+  Dom.btnRemoveKey().addEventListener('click', function() {
+    localStorage.removeItem('aria-api-key');
+    _cachedModels = null;
+    Dom.apiKeyInput().value = '';
+    updateAiIndicators(false);
+    showBadge(Dom.aiStatusBadge(), 'ok', 'Clave eliminada. Modo local activo.');
+  });
+  Dom.btnSaveKey().addEventListener('click', async function() {
+    var key = Dom.apiKeyInput().value.trim();
+    var btn = Dom.btnSaveKey();
+    if (!key) { showBadge(Dom.aiStatusBadge(), 'err', 'Pega una clave de Gemini.'); return; }
+    btn.disabled = true;
+    try {
+      showBadge(Dom.aiStatusBadge(), 'ok', 'Comprobando conexión…');
+      if (!await validateApiKey(key)) {
+        showBadge(Dom.aiStatusBadge(), 'err', 'No se pudo validar la clave. Revisa la clave, sus permisos y tu conexión.');
+        return;
+      }
+      localStorage.setItem('aria-api-key', key);
+      updateAiIndicators(true);
+      showBadge(Dom.aiStatusBadge(), 'ok', 'Clave guardada. Ya puedes preguntar.');
+    } catch (err) {
+      showBadge(Dom.aiStatusBadge(), 'err', 'No se pudo guardar la clave en este navegador.');
+    } finally { btn.disabled = false; }
+  });
   /* Cerrar con Escape si el modal sigue en el DOM */
   document.addEventListener('keydown', function(e) {
     var modal = Dom.apiModal();

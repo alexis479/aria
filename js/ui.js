@@ -218,8 +218,7 @@ function openApiModal() {
   const badge = Dom.aiStatusBadge();
 
   const saved = localStorage.getItem('aria-api-key') || '';
-  input.value = saved ? '•'.repeat(20) : '';
-  input.dataset.real = saved;
+  input.value = saved;
   input.type = 'password';
 
   badge.hidden = true;

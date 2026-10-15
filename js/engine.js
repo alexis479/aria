@@ -18,6 +18,22 @@ var ariaMode = 'estudio';
 
 /* ── Cache de modelos disponibles ── */
 let _cachedModels = null;
+let _modelError = '';
+
+async function fetchWithTimeout(url, options = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  try { return await fetch(url, { ...options, signal: controller.signal }); }
+  finally { clearTimeout(timer); }
+}
+
+function connectionError(status) {
+  if (status === 400 || status === 401 || status === 403)
+    return 'La clave de Gemini no es válida o no tiene permisos. Abre Conectar IA y guarda una clave válida.';
+  if (status === 429)
+    return 'Gemini alcanzó su límite de uso. Intenta más tarde o revisa la cuota de tu clave en Google AI Studio.';
+  return 'No pude conectar con Gemini. Revisa tu conexión e intenta de nuevo.';
+}
 
 /* ════════════════════════════════════════════════
    GENERACIÓN DE IMÁGENES
@@ -88,13 +104,14 @@ async function generateImage(prompt) {
  * @returns {Promise<string[]>} lista de nombres de modelos
  */
 async function listAvailableModels(apiKey) {
+  _modelError = '';
   if (_cachedModels) return _cachedModels;
 
   try {
-    const res = await fetch(
+    const res = await fetchWithTimeout(
       `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`
     );
-    if (!res.ok) return [];
+    if (!res.ok) { _modelError = connectionError(res.status); return []; }
 
     const data = await res.json();
 
@@ -127,6 +144,7 @@ async function listAvailableModels(apiKey) {
     return models;
 
   } catch (err) {
+    _modelError = connectionError();
     console.warn('[ARIA] No se pudo listar modelos:', err.message);
     return [];
   }
@@ -135,17 +153,20 @@ async function listAvailableModels(apiKey) {
 /* ── Llamada a Gemini API ── */
 async function callGeminiAPI(userMessage, conversationHistory = []) {
   const apiKey = localStorage.getItem('aria-api-key');
-  if (!apiKey) return null;
+  if (!apiKey) return { __error: 'La IA no está conectada. Abre Conectar IA y guarda tu clave de Gemini para responder preguntas generales.' };
 
   // 1️⃣ Descubrir modelos disponibles para esta key
   const availableModels = await listAvailableModels(apiKey);
   if (availableModels.length === 0) {
     console.warn('[ARIA] No se encontraron modelos disponibles para esta key.');
-    return null;
+    return { __error: _modelError || 'No hay modelos de chat disponibles para esta clave. Revisa la configuración en Conectar IA.' };
   }
 
   // 2️⃣ Construir la petición con mínimo historial (evita contaminación de contexto)
-  const historyContents = conversationHistory
+  const previousMessages = conversationHistory.slice();
+  const lastMessage = previousMessages[previousMessages.length - 1];
+  if (lastMessage && lastMessage.role === 'user' && lastMessage.text === userMessage) previousMessages.pop();
+  const historyContents = previousMessages
     .slice(-4)  // solo los últimos 2 intercambios
     .map(m => ({
       role:  m.role === 'user' ? 'user' : 'model',
@@ -175,10 +196,11 @@ async function callGeminiAPI(userMessage, conversationHistory = []) {
   };
 
   // 3️⃣ Probar modelos disponibles uno por uno
-  for (const model of availableModels) {
+  let lastError = connectionError();
+  for (const model of availableModels.slice(0, 3)) {
     try {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-      const res  = await fetch(url, {
+      const res  = await fetchWithTimeout(url, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify(bodyObj),
@@ -189,13 +211,14 @@ async function callGeminiAPI(userMessage, conversationHistory = []) {
         const msg     = errData?.error?.message || `HTTP ${res.status}`;
         console.warn(`[ARIA] ${model} → ${msg}`);
         // Key inválida/sin permisos → parar todo
-        if (res.status === 403) return { __error: msg };
+        lastError = connectionError(res.status);
+        if ([401, 403].includes(res.status)) return { __error: lastError };
         // Modelo no soporta multiturn u otro error → saltar al siguiente
         continue;
       }
 
       const data = await res.json();
-      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      const text = (data?.candidates?.[0]?.content?.parts || []).filter(p => !p.thought).map(p => p.text || '').join('');
       if (text) {
         console.info(`[ARIA] ✓ Respondido por: ${model}`);
         return text.trim();
@@ -206,13 +229,13 @@ async function callGeminiAPI(userMessage, conversationHistory = []) {
     }
   }
 
-  return null;
+  return { __error: lastError };
 }
 
 /* ── Validar API key (test rápido con ListModels) ── */
 async function validateApiKey(key) {
   try {
-    const res = await fetch(
+    const res = await fetchWithTimeout(
       `https://generativelanguage.googleapis.com/v1beta/models?key=${key}`
     );
     if (!res.ok) return false;
@@ -265,6 +288,11 @@ function escapeHtmlSimple(str) {
 function getLocalResponse(userInput) {
   const raw  = userInput.trim();
   const norm = normalize(raw);
+
+  if (/\bbolivia\b/.test(norm) && /aniversario|independencia|fiesta nacional/.test(norm)) {
+    const text = 'El aniversario de la independencia de Bolivia se celebra el 6 de agosto. La independencia fue proclamada el 6 de agosto de 1825.';
+    return { text, html: formatResponse(text), tag: 'bolivia' };
+  }
 
   if (raw.length < 3) {
     return { text: SHORT_PROMPT, html: formatResponse(SHORT_PROMPT), tag: 'ayuda' };
@@ -322,11 +350,15 @@ async function getAriaResponse(userInput, conversationHistory = []) {
 
   // Error de key inválida → devolver objeto especial para mostrar en UI
   if (aiResult && typeof aiResult === 'object' && aiResult.__error) {
-    return { __keyError: true, errorDetail: aiResult.__error };
+    if (typeof updateAiIndicators === 'function') updateAiIndicators(false);
+    const local = getLocalResponse(userInput);
+    if (local.tag !== 'fallback') return { ...local, source: 'local' };
+    return { text: aiResult.__error, html: escapeHtml(aiResult.__error), tag: 'ayuda', source: 'error' };
   }
 
   // Respuesta exitosa de Gemini
   if (typeof aiResult === 'string' && aiResult.length > 0) {
+    if (typeof updateAiIndicators === 'function') updateAiIndicators(true);
     return {
       text:   aiResult,
       html:   formatResponse(aiResult),
