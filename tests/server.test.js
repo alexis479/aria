@@ -77,6 +77,26 @@ test('image requests also use the private server credential', async t => {
   };
   assert.equal((await request({message:'un gato',task:'image'})).data.imageUrl,'data:image/png;base64,aGVsbG8=');
 });
+test('research reserves answer tokens and retries a truncated response instead of displaying the title', async t => {
+  const request = setup(t);
+  let generations = 0;
+  global.fetch = async (url, options) => {
+    if(options.method === 'GET') return ok({models:[{name:'models/gemini-2.5-flash',supportedGenerationMethods:['generateContent']}]});
+    const body = JSON.parse(options.body);
+    assert.equal(body.generationConfig.maxOutputTokens,8192);
+    assert.equal(body.generationConfig.thinkingConfig.thinkingBudget,512);
+    generations++;
+    return ok({candidates:[{finishReason:generations===1?'MAX_TOKENS':'STOP',content:{parts:[{text:generations===1?'# Informe cort':'Explicación completa con conclusión.'}]}}]});
+  };
+  const result = await request({message:'Investiga un tema',mode:'investigar'});
+  assert.equal(generations,2);assert.equal(result.data.text,'Explicación completa con conclusión.');
+});
+test('repeated truncation is not returned as a successful answer', async t => {
+  const request = setup(t);
+  global.fetch = async (url, options) => options.method==='GET' ? ok(listing) : ok({candidates:[{finishReason:'MAX_TOKENS',content:{parts:[{text:'# Informe cortado'}]}}]});
+  const result = await request({message:'Investiga un tema',mode:'investigar'});
+  assert.equal(result.statusCode,502);assert(!result.data.text);assert.match(result.data.error,/completar/);
+});
 test('browser sends no credential, removes duplicated current question and escapes response HTML', async () => {
   let sent;
   const c = vm.createContext({ AbortController, setTimeout, clearTimeout, fetch: async (url, options) => {

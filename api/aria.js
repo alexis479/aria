@@ -3,7 +3,7 @@
 const API_BASE = 'https://generativelanguage.googleapis.com/v1beta/';
 const PROMPTS = {
   estudio: 'Eres ARIA, un asistente educativo boliviano. Explica en español de forma clara, didáctica y breve. Usa ejemplos y reconoce cuando no sabes algo.',
-  investigar: 'Eres ARIA en modo Investigar. Explica en español con detalle y precisión. No inventes fuentes ni afirmes haber buscado en Internet.',
+  investigar: 'Eres ARIA en modo Investigar. Responde directamente con una explicación completa en español de entre 350 y 600 palabras cuando el tema lo requiera. Organiza el contenido con subtítulos breves: introducción, aspectos principales, aplicaciones o ejemplos, limitaciones y conclusión. Evita saludos largos, anuncios de que vas a investigar y títulos grandilocuentes. Termina la explicación dentro de esa extensión. No inventes fuentes, enlaces ni datos actuales y no afirmes haber buscado en Internet. Si te piden actualidad, aclara que no tienes búsqueda web en tiempo real.',
   debate: 'Eres ARIA en modo Debate. Ayuda a contrastar ideas con argumentos y evidencia. Pide que el usuario justifique su postura, mantén el respeto y corrige errores. Responde en español.',
 };
 let modelCache = null;
@@ -59,6 +59,14 @@ function validateInput(body) {
   return { message: message.trim(), mode, task, history };
 }
 
+function textConfig(model, mode) {
+  const config = { temperature: 0.7, maxOutputTokens: mode === 'investigar' ? 8192 : 4096 };
+  // The output limit includes thought tokens; leave room for the visible answer.
+  if (/^gemini-2\.5-/.test(model)) config.thinkingConfig = { thinkingBudget: 512 };
+  else if (/^gemini-[34](?:\.|-)/.test(model)) config.thinkingConfig = { thinkingLevel: 'low' };
+  return config;
+}
+
 module.exports = async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -91,12 +99,25 @@ module.exports = async function handler(req, res) {
     } : {
       system_instruction: { parts: [{ text: PROMPTS[input.mode] }] },
       contents: [...input.history.map(m => ({ role: m.role === 'aria' ? 'model' : 'user', parts: [{ text: m.text }] })), { role: 'user', parts: [{ text: input.message }] }],
-      generationConfig: { temperature: 0.7, maxOutputTokens: 2048 },
+      generationConfig: {},
     };
     let lastError;
     for (const model of candidates.slice(0, 3)) {
       try {
-        const data = await google('models/' + model + ':generateContent', key, controller.signal, body);
+        if (input.task === 'chat') body.generationConfig = textConfig(model, input.mode);
+        let data = await google('models/' + model + ':generateContent', key, controller.signal, body);
+        if (input.task === 'chat' && ['MAX_TOKENS', 'CONTINUATION'].includes(data.candidates?.[0]?.finishReason)) {
+          const retryBody = {
+            ...body,
+            system_instruction: { parts: [{ text: PROMPTS[input.mode] + ' La respuesta anterior no pudo completarse. Redacta de nuevo una respuesta autónoma de un máximo de 350 palabras, con contenido y una conclusión. No menciones este reintento.' }] },
+            generationConfig: { ...body.generationConfig, maxOutputTokens: 8192 },
+          };
+          data = await google('models/' + model + ':generateContent', key, controller.signal, retryBody);
+        }
+        if (input.task === 'chat' && data.candidates?.[0]?.finishReason && data.candidates[0].finishReason !== 'STOP') {
+          lastError = new ServiceError(502, 'La IA no pudo completar la respuesta. Prueba pedir una parte más concreta del tema.');
+          continue;
+        }
         const parts = data.candidates?.[0]?.content?.parts || [];
         if (input.task === 'image') {
           const image = parts.find(p => /^image\/(png|jpeg|webp)$/.test(p.inlineData?.mimeType) && p.inlineData.data);

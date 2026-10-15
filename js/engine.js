@@ -49,6 +49,7 @@ function matchesAny(norm, raw, keywords) {
 
 function formatResponse(text) {
   return escapeHtml(text)
+    .replace(/^#{1,6}\s+(.+)$/gm, '<strong>$1</strong>')
     .replace(/```[\w]*\n?([\s\S]*?)```/g, (_, code) =>
       `<pre class="code-block"><code>${code.trim()}</code></pre>`
     )
