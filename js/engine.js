@@ -1,259 +1,40 @@
-/**
- * engine.js — Motor de respuestas de ARIA
- * Soporta Gemini AI + fallback local mejorado
- */
-
+/** Motor de ARIA: las credenciales se usan exclusivamente en el servidor. */
 'use strict';
-
-/* ── System prompts por modo ── */
-const SYSTEM_PROMPTS = {
-  estudio:    'Eres ARIA en MODO ESTUDIO. Explica de forma clara, didáctica y paso a paso. Usa ejemplos simples y analogías. Responde en español, máximo 4 oraciones cortas.',
-  investigar: 'Eres ARIA en MODO INVESTIGAR. Proporciona información detallada y precisa con datos concretos. Sé exhaustivo y cita cifras o hechos cuando sea posible. Responde en español.',
-  debate:     'Eres ARIA en MODO DEBATE. Toma una posición polémica y defiéndela con argumentos sólidos. Reta al usuario a que justifique su postura. Sé directo y combativo pero con evidencia. Responde en español.',
-};
-const SYSTEM_PROMPT = SYSTEM_PROMPTS.estudio; // default
-
-/* ── Modo actual (se actualiza desde app.js) ── */
 var ariaMode = 'estudio';
 
-/* ── Cache de modelos disponibles ── */
-let _cachedModels = null;
-let _modelError = '';
-
-async function fetchWithTimeout(url, options = {}) {
+async function serverRequest(payload) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 15000);
-  try { return await fetch(url, { ...options, signal: controller.signal }); }
-  finally { clearTimeout(timer); }
-}
-
-function connectionError(status) {
-  if (status === 400 || status === 401 || status === 403)
-    return 'La clave de Gemini no es válida o no tiene permisos. Abre Conectar IA y guarda una clave válida.';
-  if (status === 429)
-    return 'Gemini alcanzó su límite de uso. Intenta más tarde o revisa la cuota de tu clave en Google AI Studio.';
-  return 'No pude conectar con Gemini. Revisa tu conexión e intenta de nuevo.';
-}
-
-/* ════════════════════════════════════════════════
-   GENERACIÓN DE IMÁGENES
-   ════════════════════════════════════════════════ */
-async function generateImage(prompt) {
-  var apiKey = localStorage.getItem('aria-api-key');
-
-  // Intento 1: Gemini 2.0 Flash Image Generation
-  if (apiKey) {
-    try {
-      var url1 = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp-image-generation:generateContent?key=' + apiKey;
-      var res1  = await fetch(url1, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: 'Generate an image of: ' + prompt }] }],
-          generationConfig: { responseModalities: ['IMAGE', 'TEXT'] }
-        })
-      });
-      if (res1.ok) {
-        var d1 = await res1.json();
-        var parts1 = ((d1.candidates || [])[0] || {});
-        var contentParts = (parts1.content || {}).parts || [];
-        for (var i = 0; i < contentParts.length; i++) {
-          var p = contentParts[i];
-          if (p.inlineData && p.inlineData.mimeType && p.inlineData.mimeType.indexOf('image/') === 0) {
-            return { imageUrl: 'data:' + p.inlineData.mimeType + ';base64,' + p.inlineData.data };
-          }
-        }
-      }
-    } catch(e1) { console.warn('[ARIA] Gemini imagen:', e1.message); }
-  }
-
-  // Intento 2: Imagen 3.0
-  if (apiKey) {
-    try {
-      var url2 = 'https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=' + apiKey;
-      var res2  = await fetch(url2, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ instances: [{ prompt: prompt }], parameters: { sampleCount: 1, aspectRatio: '1:1' } })
-      });
-      if (res2.ok) {
-        var d2 = await res2.json();
-        var pred = (d2.predictions || [])[0];
-        if (pred && pred.bytesBase64Encoded) {
-          return { imageUrl: 'data:' + (pred.mimeType || 'image/png') + ';base64,' + pred.bytesBase64Encoded };
-        }
-      }
-    } catch(e2) { console.warn('[ARIA] Imagen 3:', e2.message); }
-  }
-
-  // ✅ Fallback garantizado: Pollinations.ai (gratis, sin API key)
-  var seed = Math.floor(Math.random() * 99999);
-  var pollinationsUrl =
-    'https://image.pollinations.ai/prompt/' +
-    encodeURIComponent(prompt + ', high quality, vibrant, detailed, beautiful') +
-    '?width=768&height=768&nologo=true&seed=' + seed;
-
-  return { imageUrl: pollinationsUrl };
-}
-
-
-
-/**
- * Consulta la API para saber qué modelos están disponibles con esta key
- * @param {string} apiKey
- * @returns {Promise<string[]>} lista de nombres de modelos
- */
-async function listAvailableModels(apiKey) {
-  _modelError = '';
-  if (_cachedModels) return _cachedModels;
-
+  const timer = setTimeout(() => controller.abort(), 55000);
   try {
-    const res = await fetchWithTimeout(
-      `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`
-    );
-    if (!res.ok) { _modelError = connectionError(res.status); return []; }
-
-    const data = await res.json();
-
-    // Palabras clave a EXCLUIR
-    const EXCLUDE = ['tts', 'embed', 'aqa', 'vision', 'image', 'audio', 'bison', 'thinking', 'learnlm'];
-
-    const models = (data.models || [])
-      .filter(m => {
-        const name    = m.name.toLowerCase();
-        const methods = m.supportedGenerationMethods || [];
-        const isChat     = methods.includes('generateContent');
-        const isExcluded = EXCLUDE.some(kw => name.includes(kw));
-        return isChat && !isExcluded;
-      })
-      // Preferir flash estable; preview y exp al final
-      .sort((a, b) => {
-        const score = n => {
-          if (n.includes('gemini-2.0-flash') && !n.includes('preview') && !n.includes('exp')) return 0;
-          if (n.includes('gemini-1.5-flash') && !n.includes('preview'))                       return 1;
-          if (n.includes('flash') && !n.includes('preview'))                                  return 2;
-          if (n.includes('exp') || n.includes('preview'))                                     return 5;
-          return 3;
-        };
-        return score(a.name) - score(b.name);
-      })
-      .map(m => m.name.replace('models/', ''));
-
-    console.info('[ARIA] Modelos disponibles:', models);
-    _cachedModels = models.length > 0 ? models : null;
-    return models;
-
+    const response = await fetch('/api/aria', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload), signal: controller.signal,
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || 'No se pudo conectar con la IA de ARIA.');
+    return data;
   } catch (err) {
-    _modelError = connectionError();
-    console.warn('[ARIA] No se pudo listar modelos:', err.message);
-    return [];
-  }
+    if (err.name === 'AbortError') throw new Error('La respuesta tardó demasiado. Intenta de nuevo.');
+    if (err instanceof TypeError) throw new Error('No pude conectar con ARIA. Revisa tu conexión e intenta de nuevo.');
+    throw err;
+  } finally { clearTimeout(timer); }
 }
 
-/* ── Llamada a Gemini API ── */
-async function callGeminiAPI(userMessage, conversationHistory = []) {
-  const apiKey = localStorage.getItem('aria-api-key');
-  if (!apiKey) return { __error: 'La IA no está conectada. Abre Conectar IA y guarda tu clave de Gemini para responder preguntas generales.' };
-
-  // 1️⃣ Descubrir modelos disponibles para esta key
-  const availableModels = await listAvailableModels(apiKey);
-  if (availableModels.length === 0) {
-    console.warn('[ARIA] No se encontraron modelos disponibles para esta key.');
-    return { __error: _modelError || 'No hay modelos de chat disponibles para esta clave. Revisa la configuración en Conectar IA.' };
-  }
-
-  // 2️⃣ Construir la petición con mínimo historial (evita contaminación de contexto)
-  const previousMessages = conversationHistory.slice();
-  const lastMessage = previousMessages[previousMessages.length - 1];
-  if (lastMessage && lastMessage.role === 'user' && lastMessage.text === userMessage) previousMessages.pop();
-  const historyContents = previousMessages
-    .slice(-4)  // solo los últimos 2 intercambios
-    .map(m => ({
-      role:  m.role === 'user' ? 'user' : 'model',
-      parts: [{ text: m.text }],
-    }));
-
-  const contents = [
-    ...historyContents,
-    { role: 'user', parts: [{ text: userMessage }] },
-  ];
-
-  const activePrompt = SYSTEM_PROMPTS[ariaMode] || SYSTEM_PROMPTS.estudio;
-  const bodyObj = {
-    system_instruction: { parts: [{ text: activePrompt }] },
-    contents,
-    generationConfig: {
-      temperature:     0.75,
-      maxOutputTokens: 400,
-      topP:            0.90,
-    },
-    safetySettings: [
-      { category: 'HARM_CATEGORY_HARASSMENT',        threshold: 'BLOCK_ONLY_HIGH' },
-      { category: 'HARM_CATEGORY_HATE_SPEECH',       threshold: 'BLOCK_ONLY_HIGH' },
-      { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_ONLY_HIGH' },
-      { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_ONLY_HIGH' },
-    ],
-  };
-
-  // 3️⃣ Probar modelos disponibles uno por uno
-  let lastError = connectionError();
-  for (const model of availableModels.slice(0, 3)) {
-    try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-      const res  = await fetchWithTimeout(url, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify(bodyObj),
-      });
-
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        const msg     = errData?.error?.message || `HTTP ${res.status}`;
-        console.warn(`[ARIA] ${model} → ${msg}`);
-        // Key inválida/sin permisos → parar todo
-        lastError = connectionError(res.status);
-        if ([401, 403].includes(res.status)) return { __error: lastError };
-        // Modelo no soporta multiturn u otro error → saltar al siguiente
-        continue;
-      }
-
-      const data = await res.json();
-      const text = (data?.candidates?.[0]?.content?.parts || []).filter(p => !p.thought).map(p => p.text || '').join('');
-      if (text) {
-        console.info(`[ARIA] ✓ Respondido por: ${model}`);
-        return text.trim();
-      }
-
-    } catch (err) {
-      console.warn(`[ARIA] Error de red con ${model}:`, err.message);
-    }
-  }
-
-  return { __error: lastError };
-}
-
-/* ── Validar API key (test rápido con ListModels) ── */
-async function validateApiKey(key) {
+async function callGeminiAPI(userMessage, history = []) {
+  const previous = history.slice();
+  const last = previous[previous.length - 1];
+  if (last && last.role === 'user' && last.text === userMessage) previous.pop();
   try {
-    const res = await fetchWithTimeout(
-      `https://generativelanguage.googleapis.com/v1beta/models?key=${key}`
-    );
-    if (!res.ok) return false;
-    const data   = await res.json();
-    const models = (data.models || []).filter(m =>
-      m.supportedGenerationMethods?.includes('generateContent')
-    );
-    // Resetear caché para que use la nueva key
-    _cachedModels = null;
-    return models.length > 0;
-  } catch {
-    return false;
-  }
+    const data = await serverRequest({ task: 'chat', message: userMessage, mode: ariaMode,
+      history: previous.slice(-4).map(m => ({ role: m.role, text: m.text.slice(0,5000) })) });
+    return data.text || { __error: 'ARIA no devolvió una respuesta. Intenta de nuevo.' };
+  } catch (err) { return { __error: err.message }; }
 }
 
-/* ─────────────────────────────────────────
-   MOTOR LOCAL (fallback sin API key)
-──────────────────────────────────────────── */
+async function generateImage(prompt) {
+  try { return await serverRequest({ task: 'image', message: prompt, mode: 'estudio' }); }
+  catch (err) { return { error: err.message }; }
+}
 
 function normalize(text) {
   return text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -267,9 +48,9 @@ function matchesAny(norm, raw, keywords) {
 }
 
 function formatResponse(text) {
-  return text
+  return escapeHtml(text)
     .replace(/```[\w]*\n?([\s\S]*?)```/g, (_, code) =>
-      `<pre class="code-block"><code>${escapeHtml(code.trim())}</code></pre>`
+      `<pre class="code-block"><code>${code.trim()}</code></pre>`
     )
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
@@ -289,7 +70,7 @@ function getLocalResponse(userInput) {
   const raw  = userInput.trim();
   const norm = normalize(raw);
 
-  if (/\bbolivia\b/.test(norm) && /aniversario|independencia|fiesta nacional/.test(norm)) {
+  if (/\bbolivia\b/.test(norm) && /aniversario|independencia|fiesta nacional|fundacion/.test(norm)) {
     const text = 'El aniversario de la independencia de Bolivia se celebra el 6 de agosto. La independencia fue proclamada el 6 de agosto de 1825.';
     return { text, html: formatResponse(text), tag: 'bolivia' };
   }
@@ -338,8 +119,7 @@ function getLocalResponse(userInput) {
   }
 
   // Fallback — sugerir conectar IA
-  const apiKey = localStorage.getItem('aria-api-key');
-  const tip = apiKey ? '' : '\n\n💡 _Conecta Gemini AI (botón ⚙️ arriba) para que pueda responder cualquier pregunta._';
+  const tip = '';
   const fallback = FALLBACKS[Math.floor(Math.random() * FALLBACKS.length)] + tip;
   return { text: fallback, html: formatResponse(fallback), tag: 'fallback' };
 }

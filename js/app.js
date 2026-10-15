@@ -45,7 +45,7 @@ async function handleSend(override) {
           '<img src="' + imgSrc + '" alt="Imagen generada" ' +
           'style="min-height:200px;background:rgba(124,58,237,.08)" ' +
           'onload="this.style.minHeight=\'auto\'" />' +
-          '<div class="generated-image-caption">✨ Creado por ARIA · ' + text.slice(0,55) + '</div>' +
+          '<div class="generated-image-caption">✨ Creado por ARIA · ' + escapeHtml(text.slice(0,55)) + '</div>' +
           '</div></div>' +
           '<div class="bubble-meta"><span class="msg-time">' + getTime() + '</span></div>' +
           '</div></div>';
@@ -53,7 +53,7 @@ async function handleSend(override) {
         container.appendChild(wrap);
         container.scrollTop = container.scrollHeight;
       } else {
-        renderMessage({ id: genId(), role: 'aria', text: result.error || 'No se pudo generar la imagen.', html: result.error || 'No se pudo generar la imagen.', time: getTime(), tag: 'ayuda' });
+        renderMessage({ id: genId(), role: 'aria', text: result.error || 'No se pudo generar la imagen.', html: escapeHtml(result.error || 'No se pudo generar la imagen.'), time: getTime(), tag: 'ayuda' });
       }
     } catch(imgErr) {
       hideTyping();
@@ -656,44 +656,20 @@ function initModes() {
 
 function initApiModal() {
   updateAiIndicators(false);
-  Dom.btnApi().addEventListener('click', openApiModal);
-  Dom.btnModalClose().addEventListener('click', closeApiModal);
-  Dom.btnToggleKey().addEventListener('click', function() {
-    var input = Dom.apiKeyInput();
-    input.type = input.type === 'password' ? 'text' : 'password';
-  });
-  Dom.btnRemoveKey().addEventListener('click', function() {
-    localStorage.removeItem('aria-api-key');
-    _cachedModels = null;
-    Dom.apiKeyInput().value = '';
-    updateAiIndicators(false);
-    showBadge(Dom.aiStatusBadge(), 'ok', 'Clave eliminada. Modo local activo.');
-  });
-  Dom.btnSaveKey().addEventListener('click', async function() {
-    var key = Dom.apiKeyInput().value.trim();
-    var btn = Dom.btnSaveKey();
-    if (!key) { showBadge(Dom.aiStatusBadge(), 'err', 'Pega una clave de Gemini.'); return; }
-    btn.disabled = true;
+  const button = Dom.btnApi();
+  if (button) button.addEventListener('click', async function() {
+    button.disabled = true;
     try {
-      showBadge(Dom.aiStatusBadge(), 'ok', 'Comprobando conexión…');
-      if (!await validateApiKey(key)) {
-        showBadge(Dom.aiStatusBadge(), 'err', 'No se pudo validar la clave. Revisa la clave, sus permisos y tu conexión.');
-        return;
-      }
-      localStorage.setItem('aria-api-key', key);
-      updateAiIndicators(true);
-      showBadge(Dom.aiStatusBadge(), 'ok', 'Clave guardada. Ya puedes preguntar.');
-    } catch (err) {
-      showBadge(Dom.aiStatusBadge(), 'err', 'No se pudo guardar la clave en este navegador.');
-    } finally { btn.disabled = false; }
-  });
-  /* Cerrar con Escape si el modal sigue en el DOM */
-  document.addEventListener('keydown', function(e) {
-    var modal = Dom.apiModal();
-    if (e.key === 'Escape' && modal && !modal.hidden) closeApiModal();
+      const response = await fetch('/api/aria', { cache: 'no-store' });
+      if (!response.ok) throw new Error();
+      const status = await response.json();
+      alert(status.configured
+        ? 'ARIA tiene una conexión compartida configurada. Puedes preguntar desde cualquier dispositivo. Si una consulta falla, revisa el mensaje de respuesta.'
+        : 'Falta configurar la conexión compartida. El administrador debe guardar GEMINI_API_KEY en Vercel y volver a desplegar.');
+    } catch (err) { alert('No se pudo consultar la conexión de ARIA. Revisa tu conexión o el despliegue.'); }
+    finally { button.disabled = false; }
   });
 }
-
 
 function showBadge(badge, type, text) {
   badge.className = 'ai-status-badge ' + type;
@@ -706,10 +682,7 @@ function showBadge(badge, type, text) {
 // ────────────────────────────────────────────────
 
 function init() {
-  if (typeof ARIA_CONFIG !== 'undefined' && ARIA_CONFIG.GEMINI_API_KEY) {
-    if (!localStorage.getItem('aria-api-key'))
-      localStorage.setItem('aria-api-key', ARIA_CONFIG.GEMINI_API_KEY);
-  }
+  localStorage.removeItem('aria-api-key');
 
   loadSavedTheme();
   setSendMessage(handleSend);

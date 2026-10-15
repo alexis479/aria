@@ -212,27 +212,6 @@ function loadSavedTheme() {
 // MODAL API KEY
 // ────────────────────────────────────────────────
 
-function openApiModal() {
-  const modal = Dom.apiModal();
-  const input = Dom.apiKeyInput();
-  const badge = Dom.aiStatusBadge();
-
-  const saved = localStorage.getItem('aria-api-key') || '';
-  input.value = saved;
-  input.type = 'password';
-
-  badge.hidden = true;
-  badge.className = 'ai-status-badge';
-  badge.textContent = '';
-
-  modal.hidden = false;
-  setTimeout(() => input.focus(), 80);
-}
-
-function closeApiModal() {
-  Dom.apiModal().hidden = true;
-}
-
 function updateAiIndicators(hasKey) {
   const pill      = Dom.aiPill();
   const modeLabel = Dom.aiModeLabel();
