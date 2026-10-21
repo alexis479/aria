@@ -131,7 +131,7 @@ async function getAriaResponse(userInput, conversationHistory = []) {
 
   // Error de key inválida → devolver objeto especial para mostrar en UI
   if (aiResult && typeof aiResult === 'object' && aiResult.__error) {
-    if (typeof updateAiIndicators === 'function') updateAiIndicators(false);
+    if (typeof updateAiIndicators === 'function') updateAiIndicators('unavailable');
     const local = getLocalResponse(userInput);
     if (local.tag !== 'fallback') return { ...local, source: 'local' };
     return { text: aiResult.__error, html: escapeHtml(aiResult.__error), tag: 'ayuda', source: 'error' };

@@ -1,5 +1,10 @@
 {
   "version": 2,
+  "headers": [
+    { "source": "/", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] },
+    { "source": "/index.html", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] },
+    { "source": "/js/(.*)", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] }
+  ],
   "functions": {
     "api/aria.js": { "maxDuration": 60 }
   }

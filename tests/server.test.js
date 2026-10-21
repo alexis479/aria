@@ -110,3 +110,32 @@ test('browser sends no credential, removes duplicated current question and escap
   for(const file of ['engine','app','ui','config'])
     assert(!/AQ\.|AIza[\w-]{20}/.test(fs.readFileSync(require.resolve('../js/'+file+'.js'),'utf8')));
 });
+test('a slow model is aborted individually and another model can respond', async t => {
+  const request = setup(t);
+  const realTimeout = global.setTimeout;
+  global.setTimeout = (fn, ms, ...args) => realTimeout(fn, ms === 10000 ? 5 : ms, ...args);
+  t.after(() => { global.setTimeout = realTimeout; });
+  let attempts = 0;
+  global.fetch = async (url, options) => {
+    if (options.method === 'GET') return ok({models:[
+      {name:'models/slow-flash',supportedGenerationMethods:['generateContent']},
+      {name:'models/working-flash',supportedGenerationMethods:['generateContent']},
+    ]});
+    attempts++;
+    if (attempts === 1) return new Promise((resolve,reject) => {
+      options.signal.addEventListener('abort', () => reject(new DOMException('Timeout','AbortError')), {once:true});
+    });
+    return ok({candidates:[{finishReason:'STOP',content:{parts:[{text:'La alternativa respondió.'}]}}]});
+  };
+  const result = await request({message:'Una pregunta'});
+  assert.equal(attempts,2);assert.equal(result.statusCode,200);assert.equal(result.data.text,'La alternativa respondió.');
+});
+test('a temporary error is not labelled as local mode in the browser', async () => {
+  let indicator;
+  const c=vm.createContext({AbortController,setTimeout,clearTimeout,updateAiIndicators:s=>{indicator=s;},
+    fetch:async()=>({ok:false,json:async()=>({error:'El proveedor está tardando.'})})});
+  vm.runInContext(fs.readFileSync(require.resolve('../js/data.js'),'utf8'),c);
+  vm.runInContext(fs.readFileSync(require.resolve('../js/engine.js'),'utf8'),c);
+  const result=await vm.runInContext('getAriaResponse("consulta xyz desconocida")',c);
+  assert.equal(indicator,'unavailable');assert.equal(result.source,'error');
+});

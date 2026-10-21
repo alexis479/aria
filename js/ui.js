@@ -213,6 +213,13 @@ function loadSavedTheme() {
 // ────────────────────────────────────────────────
 
 function updateAiIndicators(hasKey) {
+  if (hasKey === 'unavailable') {
+    const pill = Dom.aiPill();
+    const label = Dom.aiModeLabel();
+    if (pill) pill.hidden = true;
+    if (label) label.textContent = ' · IA temporalmente no disponible';
+    return;
+  }
   const pill      = Dom.aiPill();
   const modeLabel = Dom.aiModeLabel();
   if (pill)      pill.hidden      = !hasKey;

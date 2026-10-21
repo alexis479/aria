@@ -21,16 +21,30 @@ function providerError(status, data) {
   return new ServiceError(502, 'El servicio de IA no pudo completar la consulta. Intenta de nuevo.');
 }
 
-async function google(path, key, signal, body) {
+async function google(path, key, signal, body, timeoutMs = 7000) {
+  const attempt = new AbortController();
+  const abort = () => attempt.abort();
+  signal.addEventListener('abort', abort, { once: true });
+  if (signal.aborted) attempt.abort();
+  const timer = setTimeout(abort, timeoutMs);
+  try {
   const response = await fetch(API_BASE + path, {
     method: body ? 'POST' : 'GET',
     headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
-    signal,
+    signal: attempt.signal,
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw providerError(response.status, data);
   return data;
+  } catch (err) {
+    if (err.name === 'AbortError' || attempt.signal.aborted)
+      throw new ServiceError(504, 'El proveedor está tardando en responder. Intenta de nuevo en unos momentos.');
+    throw err;
+  } finally {
+    clearTimeout(timer);
+    signal.removeEventListener('abort', abort);
+  }
 }
 
 async function models(key, signal) {
@@ -102,17 +116,19 @@ module.exports = async function handler(req, res) {
       generationConfig: {},
     };
     let lastError;
-    for (const model of candidates.slice(0, 3)) {
+    const modelAttempts = candidates.length === 1 ? [candidates[0], candidates[0]] : candidates.slice(0, 3);
+    for (const model of modelAttempts) {
       try {
         if (input.task === 'chat') body.generationConfig = textConfig(model, input.mode);
-        let data = await google('models/' + model + ':generateContent', key, controller.signal, body);
+        const attemptTimeout = input.task === 'image' ? 25000 : input.mode === 'investigar' ? 14000 : 10000;
+        let data = await google('models/' + model + ':generateContent', key, controller.signal, body, attemptTimeout);
         if (input.task === 'chat' && ['MAX_TOKENS', 'CONTINUATION'].includes(data.candidates?.[0]?.finishReason)) {
           const retryBody = {
             ...body,
             system_instruction: { parts: [{ text: PROMPTS[input.mode] + ' La respuesta anterior no pudo completarse. Redacta de nuevo una respuesta autónoma de un máximo de 350 palabras, con contenido y una conclusión. No menciones este reintento.' }] },
             generationConfig: { ...body.generationConfig, maxOutputTokens: 8192 },
           };
-          data = await google('models/' + model + ':generateContent', key, controller.signal, retryBody);
+          data = await google('models/' + model + ':generateContent', key, controller.signal, retryBody, attemptTimeout);
         }
         if (input.task === 'chat' && data.candidates?.[0]?.finishReason && data.candidates[0].finishReason !== 'STOP') {
           lastError = new ServiceError(502, 'La IA no pudo completar la respuesta. Prueba pedir una parte más concreta del tema.');

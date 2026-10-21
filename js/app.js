@@ -99,7 +99,7 @@ async function handleSend(override) {
         tag:  response.tag,
       };
       renderMessage(ariaMsg);
-      conversationHistory.push({ role: 'aria', text: response.text });
+      if (response.source !== 'error') conversationHistory.push({ role: 'aria', text: response.text });
       if (conversationHistory.length > 20) conversationHistory.splice(0, 2);
       autoSaveCurrentChat();
       if (TtsState.autoSpeak) speakText(response.text);
@@ -480,7 +480,7 @@ function initVoiceFloat() {
       hideTyping();
       if (!response.__keyError && response.text) {
         renderMessage({ id: genId(), role: 'aria', text: response.text, html: response.html, time: getTime(), tag: response.tag });
-        conversationHistory.push({ role: 'aria', text: response.text });
+        if (response.source !== 'error') conversationHistory.push({ role: 'aria', text: response.text });
         if (conversationHistory.length > 20) conversationHistory.splice(0, 2);
         autoSaveCurrentChat();
         speakAndUpdate(response.text, setFloatState);
