@@ -6,6 +6,8 @@ const PROMPTS = {
   investigar: 'Eres ARIA en modo Investigar. Responde directamente con una explicación completa en español de entre 350 y 600 palabras cuando el tema lo requiera. Organiza el contenido con subtítulos breves: introducción, aspectos principales, aplicaciones o ejemplos, limitaciones y conclusión. Evita saludos largos, anuncios de que vas a investigar y títulos grandilocuentes. Termina la explicación dentro de esa extensión. No inventes fuentes, enlaces ni datos actuales y no afirmes haber buscado en Internet. Si te piden actualidad, aclara que no tienes búsqueda web en tiempo real.',
   debate: 'Eres ARIA en modo Debate. Ayuda a contrastar ideas con argumentos y evidencia. Pide que el usuario justifique su postura, mantén el respeto y corrige errores. Responde en español.',
 };
+const WRITING_RULES = 'Escribe en español con ortografía, tildes, concordancia y puntuación correctas. Antes de entregar la respuesta, revisa su redacción. Usa las formas normativas, por ejemplo matemáticas, no matematikas. No imites los errores ortográficos ni las abreviaturas de la pregunta, salvo que el usuario pida analizar o citar literalmente un texto. Usa un tono natural, claro y adecuado para una explicación escolar. No pongas comillas alrededor de palabras comunes, conceptos, títulos, ejemplos ni analogías solo para destacarlos. Reserva las comillas para citas textuales, títulos que realmente las requieran o explicaciones lingüísticas. Evita adornos y énfasis repetitivos. Conserva los nombres propios, fórmulas y fragmentos de código tal como corresponda.';
+function systemPrompt(mode) { return PROMPTS[mode] + ' ' + WRITING_RULES; }
 let modelCache = null;
 
 class ServiceError extends Error {
@@ -111,7 +113,7 @@ module.exports = async function handler(req, res) {
       contents: [{ role: 'user', parts: [{ text: input.message }] }],
       generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
     } : {
-      system_instruction: { parts: [{ text: PROMPTS[input.mode] }] },
+      system_instruction: { parts: [{ text: systemPrompt(input.mode) }] },
       contents: [...input.history.map(m => ({ role: m.role === 'aria' ? 'model' : 'user', parts: [{ text: m.text }] })), { role: 'user', parts: [{ text: input.message }] }],
       generationConfig: {},
     };
@@ -125,7 +127,7 @@ module.exports = async function handler(req, res) {
         if (input.task === 'chat' && ['MAX_TOKENS', 'CONTINUATION'].includes(data.candidates?.[0]?.finishReason)) {
           const retryBody = {
             ...body,
-            system_instruction: { parts: [{ text: PROMPTS[input.mode] + ' La respuesta anterior no pudo completarse. Redacta de nuevo una respuesta autónoma de un máximo de 350 palabras, con contenido y una conclusión. No menciones este reintento.' }] },
+            system_instruction: { parts: [{ text: systemPrompt(input.mode) + ' La respuesta anterior no pudo completarse. Redacta de nuevo una respuesta autónoma de un máximo de 350 palabras, con contenido y una conclusión. No menciones este reintento.' }] },
             generationConfig: { ...body.generationConfig, maxOutputTokens: 8192 },
           };
           data = await google('models/' + model + ':generateContent', key, controller.signal, retryBody, attemptTimeout);

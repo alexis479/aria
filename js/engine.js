@@ -115,7 +115,7 @@ function getLocalResponse(userInput) {
 
   // Por qué
   if (norm.includes('por que') || norm.includes('porque') || norm.includes('por qué')) {
-    const r = `Buena pregunta con "por qué". 🤔 Me gusta debatir causas.\nContame exactamente qué quieres entender y te doy 3 razones con evidencia, no humo. ¿Cuál es el tema exacto?`;
+    const r = `Para explicar las causas, necesito conocer el tema concreto. ¿Qué quieres entender? Puedo ayudarte con una explicación y ejemplos.`;
     return { text: r, html: formatResponse(r), tag: 'debate' };
   }
 
