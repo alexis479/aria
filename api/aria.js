@@ -68,7 +68,7 @@ function validateInput(body) {
   const { message, mode = 'estudio', task = 'chat', history = [] } = body;
   if (typeof message !== 'string' || !message.trim() || message.length > 600)
     throw new ServiceError(400, 'Escribe una pregunta de hasta 600 caracteres.');
-  if (!['chat', 'image'].includes(task) || !Object.hasOwn(PROMPTS, mode))
+  if (task !== 'chat' || !Object.hasOwn(PROMPTS, mode))
     throw new ServiceError(400, 'Selecciona un modo válido.');
   if (!Array.isArray(history) || history.length > 4 || history.some(m => !m || !['user', 'aria'].includes(m.role) || typeof m.text !== 'string' || m.text.length > 5000))
     throw new ServiceError(400, 'El contexto de la conversación no es válido.');
@@ -104,15 +104,12 @@ module.exports = async function handler(req, res) {
     const raw = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
     const input = validateInput(raw);
     if (!key) throw new ServiceError(503, 'El administrador todavía debe conectar la IA de ARIA en el servidor.');
-    const explicitModel = input.task === 'image' ? process.env.GEMINI_IMAGE_MODEL : process.env.GEMINI_MODEL;
+    const explicitModel = process.env.GEMINI_MODEL;
     if (explicitModel && !/^[a-zA-Z0-9._-]+$/.test(explicitModel)) throw new ServiceError(503, 'El modelo configurado en el servidor no es válido.');
     const available = explicitModel ? [explicitModel] : await models(key, controller.signal);
-    const candidates = explicitModel ? available : available.filter(n => input.task === 'image' ? /image/.test(n) : !/image|tts|audio|robotics|computer|deep-research/.test(n)).sort((a,b) => Number(/flash/.test(b)) - Number(/flash/.test(a)));
-    if (!candidates.length) throw new ServiceError(503, input.task === 'image' ? 'La cuenta de ARIA no tiene un modelo de imágenes disponible.' : 'La cuenta de ARIA no tiene un modelo de conversación disponible.');
-    const body = input.task === 'image' ? {
-      contents: [{ role: 'user', parts: [{ text: input.message }] }],
-      generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
-    } : {
+    const candidates = explicitModel ? available : available.filter(n => !/image|tts|audio|robotics|computer|deep-research/.test(n)).sort((a,b) => Number(/flash/.test(b)) - Number(/flash/.test(a)));
+    if (!candidates.length) throw new ServiceError(503, 'La cuenta de ARIA no tiene un modelo de conversación disponible.');
+    const body = {
       system_instruction: { parts: [{ text: systemPrompt(input.mode) }] },
       contents: [...input.history.map(m => ({ role: m.role === 'aria' ? 'model' : 'user', parts: [{ text: m.text }] })), { role: 'user', parts: [{ text: input.message }] }],
       generationConfig: {},
@@ -121,10 +118,10 @@ module.exports = async function handler(req, res) {
     const modelAttempts = candidates.length === 1 ? [candidates[0], candidates[0]] : candidates.slice(0, 3);
     for (const model of modelAttempts) {
       try {
-        if (input.task === 'chat') body.generationConfig = textConfig(model, input.mode);
-        const attemptTimeout = input.task === 'image' ? 25000 : input.mode === 'investigar' ? 14000 : 10000;
+        body.generationConfig = textConfig(model, input.mode);
+        const attemptTimeout = input.mode === 'investigar' ? 14000 : 10000;
         let data = await google('models/' + model + ':generateContent', key, controller.signal, body, attemptTimeout);
-        if (input.task === 'chat' && ['MAX_TOKENS', 'CONTINUATION'].includes(data.candidates?.[0]?.finishReason)) {
+        if (['MAX_TOKENS', 'CONTINUATION'].includes(data.candidates?.[0]?.finishReason)) {
           const retryBody = {
             ...body,
             system_instruction: { parts: [{ text: systemPrompt(input.mode) + ' La respuesta anterior no pudo completarse. Redacta de nuevo una respuesta autónoma de un máximo de 350 palabras, con contenido y una conclusión. No menciones este reintento.' }] },
@@ -132,18 +129,13 @@ module.exports = async function handler(req, res) {
           };
           data = await google('models/' + model + ':generateContent', key, controller.signal, retryBody, attemptTimeout);
         }
-        if (input.task === 'chat' && data.candidates?.[0]?.finishReason && data.candidates[0].finishReason !== 'STOP') {
+        if (data.candidates?.[0]?.finishReason && data.candidates[0].finishReason !== 'STOP') {
           lastError = new ServiceError(502, 'La IA no pudo completar la respuesta. Prueba pedir una parte más concreta del tema.');
           continue;
         }
         const parts = data.candidates?.[0]?.content?.parts || [];
-        if (input.task === 'image') {
-          const image = parts.find(p => /^image\/(png|jpeg|webp)$/.test(p.inlineData?.mimeType) && p.inlineData.data);
-          if (image) return res.status(200).json({ imageUrl: 'data:' + image.inlineData.mimeType + ';base64,' + image.inlineData.data });
-        } else {
-          const text = parts.filter(p => !p.thought).map(p => p.text || '').join('').trim();
-          if (text) return res.status(200).json({ text });
-        }
+        const text = parts.filter(p => !p.thought).map(p => p.text || '').join('').trim();
+        if (text) return res.status(200).json({ text });
         lastError = new ServiceError(502, 'El servicio no devolvió contenido para esta consulta. Prueba reformularla.');
       } catch (err) {
         if (controller.signal.aborted || err.status === 503) throw err;

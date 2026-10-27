@@ -7,7 +7,7 @@
 const conversationHistory = [];
 const HISTORY_KEY = 'aria-chat-history';
 let currentChatId = null;
-var currentMode = 'estudio'; // 'estudio' | 'investigar' | 'debate' | 'imagen'
+var currentMode = 'estudio'; // 'estudio' | 'investigar' | 'debate'
 
 const VoiceState = { listening: false };
 const TtsState   = { speaking: false, utterance: null, autoSpeak: false };
@@ -23,46 +23,6 @@ async function handleSend(override) {
   if (!text || State.locked) return;
   if (override === undefined) input.value = '';
   closeSidebar();
-
-  // ── Modo Imagen ──
-  if (currentMode === 'imagen') {
-    const userMsg = { id: genId(), role: 'user', text, html: escapeHtml(text), time: getTime(), tag: '' };
-    renderMessage(userMsg);
-    State.locked = true; setInputDisabled(true); showTyping();
-    try {
-      const result = await generateImage(text);
-      hideTyping();
-      const imgSrc = result.imageUrl || result.dataUrl;
-      if (imgSrc) {
-        const wrap = document.createElement('div');
-        wrap.className = 'msg-row aria';
-        wrap.innerHTML =
-          '<div class="msg-group">' +
-          '<div class="msg-avatar aria-avatar">A</div>' +
-          '<div class="msg-content">' +
-          '<div class="bubble aria">Aquí tu imagen 🎨' +
-          '<div class="generated-image-wrap">' +
-          '<img src="' + imgSrc + '" alt="Imagen generada" ' +
-          'style="min-height:200px;background:rgba(124,58,237,.08)" ' +
-          'onload="this.style.minHeight=\'auto\'" />' +
-          '<div class="generated-image-caption">✨ Creado por ARIA · ' + escapeHtml(text.slice(0,55)) + '</div>' +
-          '</div></div>' +
-          '<div class="bubble-meta"><span class="msg-time">' + getTime() + '</span></div>' +
-          '</div></div>';
-        const container = Dom.messages();
-        container.appendChild(wrap);
-        container.scrollTop = container.scrollHeight;
-      } else {
-        renderMessage({ id: genId(), role: 'aria', text: result.error || 'No se pudo generar la imagen.', html: escapeHtml(result.error || 'No se pudo generar la imagen.'), time: getTime(), tag: 'ayuda' });
-      }
-    } catch(imgErr) {
-      hideTyping();
-      renderMessage({ id: genId(), role: 'aria', text: 'Error al generar imagen.', html: 'Error al generar imagen.', time: getTime(), tag: 'ayuda' });
-    } finally {
-      State.locked = false; setInputDisabled(false); focusInput();
-    }
-    return;
-  }
 
   const userMsg = {
     id:   genId(),
@@ -604,10 +564,10 @@ const MODE_LABELS = {
   estudio:    { placeholder: 'Pregunta lo que quieras aprender...', badge: '📚 Estudio' },
   investigar: { placeholder: 'Escribe el tema a investigar...', badge: '🔍 Investigar' },
   debate:     { placeholder: 'Lanza una idea y debatimos...', badge: '🥊 Debate' },
-  imagen:     { placeholder: 'Describe la imagen a crear (ej: un gato en el espacio)...', badge: '🎨 Crear Imagen' },
 };
 
 function setMode(mode) {
+  if (!Object.hasOwn(MODE_LABELS, mode)) return;
   currentMode = mode;
   if (typeof ariaMode !== 'undefined') ariaMode = mode; // sync engine.js
 
@@ -625,7 +585,7 @@ function setMode(mode) {
   var ind = document.getElementById('mode-indicator');
   if (ind) {
     ind.textContent = info.badge;
-    ind.className = mode === 'imagen' ? 'mode-imagen' : '';
+    ind.className = '';
     ind.id = 'mode-indicator';
   }
 

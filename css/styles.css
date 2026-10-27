@@ -837,8 +837,6 @@ input  { font-family: var(--font); }
   /* Botón flotante de voz */
   .voice-float-btn { bottom: 75px; right: 12px; width: 50px; height: 50px; }
 
-  /* Imagen generada: ancho completo en móvil */
-  .generated-image-wrap { max-width: 100%; }
 
   /* Typing */
   .typing-label { display: none; }
@@ -912,42 +910,10 @@ body.dark::before {
   color: var(--purple);
   box-shadow: 0 2px 12px rgba(124,58,237,.15);
 }
-/* Botón Crear Imagen — acento especial */
-.mode-img-btn { color: #2563eb; }
-.mode-img-btn:hover, .mode-img-btn.active {
-  background: rgba(37,99,235,.10);
-  border-color: rgba(37,99,235,.35);
-  color: #2563eb;
-  box-shadow: 0 2px 12px rgba(37,99,235,.15);
-}
-
 /* Indicador de modo activo en footer */
 #mode-indicator {
   font-size: 10px; font-family: var(--mono); font-weight: 700;
   padding: 1px 8px; border-radius: var(--radius-full);
   background: rgba(124,58,237,.1); color: var(--purple);
   letter-spacing: .04em; text-transform: uppercase;
-}
-#mode-indicator.mode-imagen {
-  background: rgba(37,99,235,.1); color: #2563eb;
-}
-
-/* ── Imagen generada en chat ── */
-.generated-image-wrap {
-  margin-top: .5rem; border-radius: var(--radius-md);
-  overflow: hidden;
-  border: 1px solid var(--glass-border);
-  box-shadow: var(--glass-shadow);
-  max-width: 320px;
-  animation: msgIn .3s cubic-bezier(.34,1.4,.64,1);
-}
-.generated-image-wrap img {
-  width: 100%; display: block;
-  object-fit: cover; border-radius: var(--radius-md);
-}
-.generated-image-caption {
-  font-size: 10px; font-family: var(--mono);
-  color: var(--text-muted); padding: 5px 10px;
-  background: var(--glass-bg);
-  backdrop-filter: blur(8px);
 }

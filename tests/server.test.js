@@ -67,15 +67,10 @@ test('quota failures and empty responses are reported honestly', async t => {
   const result = await request({message:'hola'});
   assert.equal(result.statusCode,502); assert.match(result.data.error,/no devolvió/);
 });
-test('image requests also use the private server credential', async t => {
+test('removed image mode is rejected without contacting the provider', async t => {
   const request = setup(t);
-  global.fetch = async (url, options) => {
-    if(options.method==='GET') return ok(listing);
-    assert(url.includes('test-image'));
-    assert.deepEqual(JSON.parse(options.body).generationConfig.responseModalities,['TEXT','IMAGE']);
-    return ok({candidates:[{content:{parts:[{inlineData:{mimeType:'image/png',data:'aGVsbG8='}}]}}]});
-  };
-  assert.equal((await request({message:'un gato',task:'image'})).data.imageUrl,'data:image/png;base64,aGVsbG8=');
+  global.fetch = async () => { throw new Error('No debe consultar modelos de imagen'); };
+  assert.equal((await request({message:'un gato',task:'image'})).statusCode,400);
 });
 test('research reserves answer tokens and retries a truncated response instead of displaying the title', async t => {
   const request = setup(t);

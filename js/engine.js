@@ -31,11 +31,6 @@ async function callGeminiAPI(userMessage, history = []) {
   } catch (err) { return { __error: err.message }; }
 }
 
-async function generateImage(prompt) {
-  try { return await serverRequest({ task: 'image', message: prompt, mode: 'estudio' }); }
-  catch (err) { return { error: err.message }; }
-}
-
 function normalize(text) {
   return text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }

@@ -14,7 +14,7 @@ La clave solo se utiliza en `api/aria.js`, nunca se envía al navegador ni se gu
 
 La configuración anterior que trataba todos los archivos como estáticos se retiró para permitir que Vercel ejecute la función `/api/aria`. Si Vercel solicita un preset, utilizar Other y la raíz de este repositorio; no configurar un comando de compilación ni una carpeta de salida separada.
 
-Los nombres `GEMINI_MODEL` y `GEMINI_IMAGE_MODEL` son opcionales. Sin ellos el servidor descubre modelos disponibles. Las imágenes requieren que la cuenta tenga un modelo con generación de imágenes habilitado.
+`GEMINI_MODEL` es opcional. Sin él, el servidor descubre modelos disponibles para conversar. ARIA ofrece los modos Estudio, Investigar y Debate.
 
 El endpoint es público para que los visitantes puedan preguntar. Configurar límites de cuota en Google y reglas de tráfico en Vercel si se necesita controlar consumo público; no se incluye un límite distribuido por usuario.
 
