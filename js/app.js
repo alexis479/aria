@@ -557,6 +557,178 @@ function speakAndUpdate(text, setFloatState) {
 }
 
 // ────────────────────────────────────────────────
+// INTÉRPRETE — turnos alternados entre dos idiomas
+// ────────────────────────────────────────────────
+
+function initInterpreter() {
+  var dialog = document.getElementById('interpreter-dialog');
+  var openBtn = document.getElementById('btn-open-interpreter');
+  if (!dialog || !openBtn) return;
+
+  var selectA = document.getElementById('interpreter-language-a');
+  var selectB = document.getElementById('interpreter-language-b');
+  var startBtn = document.getElementById('btn-start-interpreter');
+  var stopBtn = document.getElementById('btn-stop-interpreter');
+  var status = document.getElementById('interpreter-status');
+  var state = { active: false, busy: false, turn: 0, recognition: null, timer: null };
+
+  function option(select) { return select.options[select.selectedIndex]; }
+  function language(select) { return option(select).value; }
+  function recognitionLanguage(select) { return option(select).dataset.recognition; }
+  function languageName(select) { return option(select).textContent; }
+  function setStatus(text) { status.textContent = text; }
+  function updateNames() {
+    document.getElementById('interpreter-label-a').textContent = languageName(selectA);
+    document.getElementById('interpreter-label-b').textContent = languageName(selectB);
+  }
+
+  function stopInterpreter(message) {
+    state.active = false;
+    state.busy = false;
+    if (state.timer) { clearTimeout(state.timer); state.timer = null; }
+    if (state.recognition) {
+      var oldRecognition = state.recognition;
+      state.recognition = null;
+      try { oldRecognition.abort(); } catch (err) {}
+    }
+    if (window.speechSynthesis) window.speechSynthesis.cancel();
+    document.getElementById('interpreter-card-a').classList.remove('interpreter-speaking');
+    document.getElementById('interpreter-card-b').classList.remove('interpreter-speaking');
+    startBtn.hidden = false;
+    stopBtn.hidden = true;
+    selectA.disabled = false;
+    selectB.disabled = false;
+    if (message) setStatus(message);
+  }
+
+  function listen() {
+    if (!state.active || state.busy) return;
+    var Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!Recognition) {
+      stopInterpreter('Este navegador no ofrece reconocimiento de voz. Prueba con otro navegador compatible.');
+      return;
+    }
+    var fromSelect = state.turn === 0 ? selectA : selectB;
+    var toSelect = state.turn === 0 ? selectB : selectA;
+    var fromCard = state.turn === 0 ? 'a' : 'b';
+    var toCard = state.turn === 0 ? 'b' : 'a';
+    var rec = new Recognition();
+    var transcript = '';
+    state.recognition = rec;
+    rec.lang = recognitionLanguage(fromSelect);
+    rec.continuous = false;
+    rec.interimResults = false;
+    rec.maxAlternatives = 1;
+    document.getElementById('interpreter-card-a').classList.toggle('interpreter-speaking', fromCard === 'a');
+    document.getElementById('interpreter-card-b').classList.toggle('interpreter-speaking', fromCard === 'b');
+    setStatus('Escuchando a la persona que habla ' + languageName(fromSelect) + '…');
+
+    rec.onresult = function(event) {
+      for (var i = event.resultIndex; i < event.results.length; i++) {
+        if (event.results[i].isFinal) transcript += event.results[i][0].transcript.trim() + ' ';
+      }
+    };
+    rec.onerror = function(event) {
+      if (!state.active) return;
+      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+        stopInterpreter('Permite el uso del micrófono en el navegador y vuelve a iniciar.');
+      } else if (event.error === 'language-not-supported') {
+        stopInterpreter('El navegador no reconoce ese idioma para dictado. Prueba otro idioma o navegador.');
+      } else if (event.error !== 'no-speech' && event.error !== 'aborted') {
+        setStatus('No pude escuchar bien. Vuelvo a intentar…');
+      }
+    };
+    rec.onend = function() {
+      if (state.recognition === rec) state.recognition = null;
+      if (!state.active) return;
+      transcript = transcript.trim();
+      if (!transcript) {
+        setStatus('No escuché una frase. Habla cuando aparezca “Escuchando”…');
+        state.timer = setTimeout(listen, 650);
+        return;
+      }
+      state.busy = true;
+      var sourceText = transcript;
+      document.getElementById('interpreter-text-' + fromCard).textContent = sourceText;
+      setStatus('Traduciendo de ' + languageName(fromSelect) + ' a ' + languageName(toSelect) + '…');
+      if (window.speechSynthesis) window.speechSynthesis.cancel();
+
+      serverRequest({ task: 'translate', mode: 'estudio', message: sourceText.slice(0, 600),
+        sourceLanguage: language(fromSelect), targetLanguage: language(toSelect) })
+        .then(function(result) {
+          if (!state.active) return;
+          var translated = (result.text || '').trim();
+          if (!translated) throw new Error('No llegó una traducción.');
+          document.getElementById('interpreter-text-' + toCard).textContent = translated;
+          document.getElementById('interpreter-card-a').classList.toggle('interpreter-speaking', toCard === 'a');
+          document.getElementById('interpreter-card-b').classList.toggle('interpreter-speaking', toCard === 'b');
+          setStatus('Reproduciendo en ' + languageName(toSelect) + '…');
+          if (!window.speechSynthesis || !window.SpeechSynthesisUtterance) {
+            setStatus('Traducción lista. La voz no está disponible en este navegador.');
+            finishTurn();
+            return;
+          }
+          var utterance = new SpeechSynthesisUtterance(translated);
+          utterance.lang = recognitionLanguage(toSelect);
+          utterance.rate = 0.96;
+          utterance.onend = finishTurn;
+          utterance.onerror = finishTurn;
+          window.speechSynthesis.speak(utterance);
+        })
+        .catch(function(err) {
+          if (state.active) stopInterpreter(err.message || 'No se pudo traducir. Revisa la conexión de ARIA e inténtalo de nuevo.');
+        });
+    };
+    try { rec.start(); }
+    catch (err) {
+      state.recognition = null;
+      stopInterpreter('No pude iniciar el micrófono. Revisa el permiso del navegador.');
+    }
+  }
+
+  function finishTurn() {
+    if (!state.active) return;
+    document.getElementById('interpreter-card-a').classList.remove('interpreter-speaking');
+    document.getElementById('interpreter-card-b').classList.remove('interpreter-speaking');
+    state.turn = state.turn === 0 ? 1 : 0;
+    state.busy = false;
+    state.timer = setTimeout(listen, 350);
+  }
+
+  function closeDialog() {
+    stopInterpreter('Intérprete detenido.');
+    dialog.hidden = true;
+  }
+
+  openBtn.addEventListener('click', function() {
+    dialog.hidden = false;
+    updateNames();
+    startBtn.focus();
+  });
+  document.getElementById('btn-close-interpreter').addEventListener('click', closeDialog);
+  dialog.addEventListener('click', function(event) { if (event.target === dialog) closeDialog(); });
+  document.addEventListener('keydown', function(event) { if (event.key === 'Escape' && !dialog.hidden) closeDialog(); });
+  selectA.addEventListener('change', updateNames);
+  selectB.addEventListener('change', updateNames);
+  startBtn.addEventListener('click', function() {
+    if (language(selectA) === language(selectB)) {
+      setStatus('Elige dos idiomas diferentes para iniciar.');
+      return;
+    }
+    state.active = true;
+    state.busy = false;
+    state.turn = 0;
+    startBtn.hidden = true;
+    stopBtn.hidden = false;
+    selectA.disabled = true;
+    selectB.disabled = true;
+    listen();
+  });
+  stopBtn.addEventListener('click', function() { stopInterpreter('Intérprete detenido. Pulsa Iniciar para continuar.'); });
+  updateNames();
+}
+
+// ────────────────────────────────────────────────
 // MODOS DE ARIA
 // ────────────────────────────────────────────────
 
@@ -651,6 +823,7 @@ function init() {
   initVoice();
   initTts();
   initVoiceFloat();
+  initInterpreter();
   initModes();
   initApiModal();
 

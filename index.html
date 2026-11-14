@@ -35,7 +35,7 @@
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a5 5 0 1 0 0 10A5 5 0 0 0 12 2z"/><rect x="8" y="14" width="8" height="6" rx="2"/><line x1="8" y1="17" x2="16" y2="17"/></svg>
           </div>
           <div class="logo-info">
-            <span class="logo-name">Hola, soy ARIA</span>
+            <span class="logo-name">Hola, soy Aria</span>
             <div class="logo-sub-row">
               <span class="status-badge"><span class="status-dot"></span>EN LÍNEA</span>
               <span id="ai-pill" class="ai-pill" hidden>✦ IA</span>
@@ -124,6 +124,9 @@
             <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
             Debate
           </button>
+          <button class="mode-btn interpreter-open-btn" id="btn-open-interpreter" type="button" aria-haspopup="dialog">
+            <span aria-hidden="true">⇄</span> Intérprete
+          </button>
         </div>
 
         <div id="messages-container" role="log" aria-live="polite" aria-label="Conversación con ARIA"></div>
@@ -179,6 +182,63 @@
         </div>
       </main>
     </div>
+
+    <section id="interpreter-dialog" class="interpreter-overlay" role="dialog" aria-modal="true" aria-labelledby="interpreter-title" hidden>
+      <div class="interpreter-panel">
+        <div class="interpreter-heading">
+          <div>
+            <p class="interpreter-eyebrow">ARIA · CONVERSACIÓN EN VIVO</p>
+            <h2 id="interpreter-title">Intérprete</h2>
+            <p class="interpreter-intro">Hablen por turnos. ARIA traducirá y leerá cada frase en el otro idioma.</p>
+          </div>
+          <button id="btn-close-interpreter" class="interpreter-close" type="button" aria-label="Cerrar intérprete">×</button>
+        </div>
+
+        <div class="interpreter-language-row">
+          <label>Persona 1 habla
+            <select id="interpreter-language-a">
+              <option value="es" data-recognition="es-ES">Español</option>
+              <option value="en" data-recognition="en-US">Inglés</option>
+              <option value="pt" data-recognition="pt-BR">Portugués</option>
+              <option value="fr" data-recognition="fr-FR">Francés</option>
+              <option value="de" data-recognition="de-DE">Alemán</option>
+              <option value="it" data-recognition="it-IT">Italiano</option>
+              <option value="ja" data-recognition="ja-JP">Japonés</option>
+            </select>
+          </label>
+          <span class="interpreter-arrow" aria-hidden="true">⇄</span>
+          <label>Persona 2 habla
+            <select id="interpreter-language-b">
+              <option value="en" data-recognition="en-US" selected>Inglés</option>
+              <option value="es" data-recognition="es-ES">Español</option>
+              <option value="pt" data-recognition="pt-BR">Portugués</option>
+              <option value="fr" data-recognition="fr-FR">Francés</option>
+              <option value="de" data-recognition="de-DE">Alemán</option>
+              <option value="it" data-recognition="it-IT">Italiano</option>
+              <option value="ja" data-recognition="ja-JP">Japonés</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="interpreter-transcripts" aria-live="polite">
+          <article class="interpreter-card" id="interpreter-card-a">
+            <h3 id="interpreter-label-a">Español</h3>
+            <p id="interpreter-text-a">La transcripción aparecerá aquí.</p>
+          </article>
+          <article class="interpreter-card" id="interpreter-card-b">
+            <h3 id="interpreter-label-b">Inglés</h3>
+            <p id="interpreter-text-b">La traducción aparecerá aquí.</p>
+          </article>
+        </div>
+
+        <p id="interpreter-status" class="interpreter-status" role="status">Elige los idiomas y comienza la conversación.</p>
+        <div class="interpreter-actions">
+          <button id="btn-start-interpreter" class="interpreter-start" type="button">Iniciar intérprete</button>
+          <button id="btn-stop-interpreter" class="interpreter-stop" type="button" hidden>Detener</button>
+        </div>
+        <p class="interpreter-note">Se necesita permiso para usar el micrófono. El reconocimiento de voz depende del navegador y de sus idiomas disponibles.</p>
+      </div>
+    </section>
   </div>
 
   <!-- Botón flotante de voz -->

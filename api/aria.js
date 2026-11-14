@@ -65,14 +65,17 @@ async function models(key, signal) {
 
 function validateInput(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) throw new ServiceError(400, 'Solicitud no válida.');
-  const { message, mode = 'estudio', task = 'chat', history = [] } = body;
+  const { message, mode = 'estudio', task = 'chat', history = [], sourceLanguage, targetLanguage } = body;
   if (typeof message !== 'string' || !message.trim() || message.length > 600)
     throw new ServiceError(400, 'Escribe una pregunta de hasta 600 caracteres.');
-  if (task !== 'chat' || !Object.hasOwn(PROMPTS, mode))
+  if (!['chat', 'translate'].includes(task) || !Object.hasOwn(PROMPTS, mode))
     throw new ServiceError(400, 'Selecciona un modo válido.');
+  const languages = ['es', 'en', 'pt', 'fr', 'de', 'it', 'ja'];
+  if (task === 'translate' && (!languages.includes(sourceLanguage) || !languages.includes(targetLanguage) || sourceLanguage === targetLanguage))
+    throw new ServiceError(400, 'Selecciona dos idiomas distintos.');
   if (!Array.isArray(history) || history.length > 4 || history.some(m => !m || !['user', 'aria'].includes(m.role) || typeof m.text !== 'string' || m.text.length > 5000))
     throw new ServiceError(400, 'El contexto de la conversación no es válido.');
-  return { message: message.trim(), mode, task, history };
+  return { message: message.trim(), mode, task, history, sourceLanguage, targetLanguage };
 }
 
 function textConfig(model, mode) {
@@ -109,23 +112,29 @@ module.exports = async function handler(req, res) {
     const available = explicitModel ? [explicitModel] : await models(key, controller.signal);
     const candidates = explicitModel ? available : available.filter(n => !/image|tts|audio|robotics|computer|deep-research/.test(n)).sort((a,b) => Number(/flash/.test(b)) - Number(/flash/.test(a)));
     if (!candidates.length) throw new ServiceError(503, 'La cuenta de ARIA no tiene un modelo de conversación disponible.');
+    const languageNames = { es: 'español', en: 'inglés', pt: 'portugués', fr: 'francés', de: 'alemán', it: 'italiano', ja: 'japonés' };
+    const requestInstruction = input.task === 'translate'
+      ? `Eres un intérprete profesional. Traduce fielmente del ${languageNames[input.sourceLanguage]} al ${languageNames[input.targetLanguage]}. Devuelve únicamente la traducción, sin explicaciones, comillas ni texto adicional. Conserva el sentido, el tono y los nombres propios. Si el texto ya está en el idioma de destino, devuélvelo sin cambios.`
+      : systemPrompt(input.mode);
     const body = {
-      system_instruction: { parts: [{ text: systemPrompt(input.mode) }] },
-      contents: [...input.history.map(m => ({ role: m.role === 'aria' ? 'model' : 'user', parts: [{ text: m.text }] })), { role: 'user', parts: [{ text: input.message }] }],
-      generationConfig: {},
+      system_instruction: { parts: [{ text: requestInstruction }] },
+      contents: [...(input.task === 'chat' ? input.history.map(m => ({ role: m.role === 'aria' ? 'model' : 'user', parts: [{ text: m.text }] })) : []), { role: 'user', parts: [{ text: input.message }] }],
+      generationConfig: input.task === 'translate' ? { temperature: 0.1, maxOutputTokens: 512 } : {},
     };
     let lastError;
     const modelAttempts = candidates.length === 1 ? [candidates[0], candidates[0]] : candidates.slice(0, 3);
     for (const model of modelAttempts) {
       try {
-        body.generationConfig = textConfig(model, input.mode);
-        const attemptTimeout = input.mode === 'investigar' ? 14000 : 10000;
+        if (input.task === 'chat') body.generationConfig = textConfig(model, input.mode);
+        const attemptTimeout = input.task === 'translate' ? 12000 : input.mode === 'investigar' ? 14000 : 10000;
         let data = await google('models/' + model + ':generateContent', key, controller.signal, body, attemptTimeout);
         if (['MAX_TOKENS', 'CONTINUATION'].includes(data.candidates?.[0]?.finishReason)) {
           const retryBody = {
             ...body,
-            system_instruction: { parts: [{ text: systemPrompt(input.mode) + ' La respuesta anterior no pudo completarse. Redacta de nuevo una respuesta autónoma de un máximo de 350 palabras, con contenido y una conclusión. No menciones este reintento.' }] },
-            generationConfig: { ...body.generationConfig, maxOutputTokens: 8192 },
+            system_instruction: { parts: [{ text: input.task === 'translate'
+              ? requestInstruction + ' La traducción anterior se cortó. Repite la traducción completa de forma concisa.'
+              : requestInstruction + ' La respuesta anterior no pudo completarse. Redacta de nuevo una respuesta autónoma de un máximo de 350 palabras, con contenido y una conclusión. No menciones este reintento.' }] },
+            generationConfig: { ...body.generationConfig, maxOutputTokens: input.task === 'translate' ? 1024 : 8192 },
           };
           data = await google('models/' + model + ':generateContent', key, controller.signal, retryBody, attemptTimeout);
         }
